@@ -21,9 +21,10 @@ RCT_EXPORT_MODULE()
              @"canMakePayments": @([PKPaymentAuthorizationViewController canMakePayments]),
              @"SUCCESS": @(PKPaymentAuthorizationStatusSuccess),
              @"FAILURE": @(PKPaymentAuthorizationStatusFailure),
-             @"DISMISSED_ERROR": @"DISMISSED_ERROR",
+             @"DISMISSED_ERROR": @"USER_DISMISSED",
              };
 }
+
 
 RCT_EXPORT_METHOD(requestPayment:(NSDictionary *)props promiseWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     PKPaymentRequest *paymentRequest = [[PKPaymentRequest alloc] init];
@@ -37,25 +38,14 @@ RCT_EXPORT_METHOD(requestPayment:(NSDictionary *)props promiseWithResolver:(RCTP
         paymentRequest.requiredBillingContactFields = [[NSSet alloc] initWithArray:@[PKContactFieldPostalAddress]];
     }
 
-    self.viewController = [[PKPaymentAuthorizationViewController alloc] initWithPaymentRequest: paymentRequest];
-    self.viewController.delegate = self;
+    self.paymentViewController = [[PKPaymentAuthorizationViewController alloc] initWithPaymentRequest: paymentRequest];
+    self.paymentViewController.delegate = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *rootViewController = RCTPresentedViewController();
-        [rootViewController presentViewController:self.viewController animated:YES completion:nil];
+        [rootViewController presentViewController:self.paymentViewController animated:YES completion:nil];
         self.requestPaymentResolve = resolve;
+        self.requestPaymentReject = reject;
     });
-}
-
-RCT_EXPORT_METHOD(complete:(NSNumber *_Nonnull)status promiseWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-    if (self.completion != NULL) {
-        self.completeResolve = resolve;
-        if ([status isEqualToNumber: self.constantsToExport[@"SUCCESS"]]) {
-            self.completion(PKPaymentAuthorizationStatusSuccess);
-        } else {
-            self.completion(PKPaymentAuthorizationStatusFailure);
-        }
-        self.completion = NULL;
-    }
 }
 
 - (NSArray *_Nonnull)getSupportedNetworks:(NSDictionary *_Nonnull)props
@@ -126,7 +116,7 @@ RCT_EXPORT_METHOD(complete:(NSNumber *_Nonnull)status promiseWithResolver:(RCTPr
                         didAuthorizePayment:(PKPayment *)payment
                                  completion:(void (^)(PKPaymentAuthorizationStatus))completion
 {
-    self.completion = completion;
+
     if (self.requestPaymentResolve != NULL) {
         NSString *paymentData = [[NSString alloc] initWithData:payment.token.paymentData encoding:NSUTF8StringEncoding];
         NSError* error = nil;
@@ -156,20 +146,25 @@ RCT_EXPORT_METHOD(complete:(NSNumber *_Nonnull)status promiseWithResolver:(RCTPr
                 @"ISOCountryCode": payment.billingContact.postalAddress.ISOCountryCode,
             } forKey:@"billingAddress"];
         }
-        self.requestPaymentResolve(paymentObject);
-        self.requestPaymentResolve = NULL;
+        self.paymentObject = paymentObject;
+        completion(PKPaymentAuthorizationStatusSuccess);
     }
 }
+
 
 - (void)paymentAuthorizationViewControllerDidFinish:(nonnull PKPaymentAuthorizationViewController *)controller {
     dispatch_async(dispatch_get_main_queue(), ^{
         [controller dismissViewControllerAnimated:YES completion:^void {
-            if (self.completeResolve != NULL) {
-                self.completeResolve(nil);
-                self.completeResolve = NULL;
+            if (self.paymentObject) {
+                self.requestPaymentResolve(self.paymentObject);
+                self.requestPaymentResolve = NULL;
+            } else {
+                self.requestPaymentReject(@"DISMISSED", @"DISMISSED_ERROR", nil);
+                self.requestPaymentReject = NULL;
             }
         }];
     });
 }
+
 
 @end
